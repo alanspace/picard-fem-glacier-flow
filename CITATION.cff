@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+title: 'Picard FEM Glacier Flow: Non-Newtonian Glacier Dynamics Simulation'
+message: >-
+  If you use this software in your research, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - family-names: Leung
+    given-names: Shek Lun
+    email: sheklunleung.qai@proton.me
+repository-code: 'https://github.com/alanspace/picard-fem-glacier-flow'
+abstract: >-
+  A computational study of glacier flow dynamics using Finite Element Methods (FEM),
+  implementing both linear and non-linear First-Order Stokes approximations with
+  Picard iteration for the Haut Glacier d'Arolla. The project includes rigorous
+  mathematical analysis, convergence studies, and professional-grade scientific
+  software implementation using FEniCSx.
+keywords:
+  - finite element method
+  - glacier dynamics
+  - computational glaciology
+  - FEniCSx
+  - Picard iteration
+  - non-Newtonian flow
+  - Stokes approximation
+  - Glen's flow law
+license: MIT
+version: 1.0.0
+date-released: '2026-01-06'

@@ -1,0 +1,174 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{booktabs}
+\geometry{a4paper, margin=1in}
+
+\title{\textbf{Comprehensive Internal Guide: Arolla Glacier FEM Project}}
+\author{Simulation Development Team}
+\date{\today}
+
+\lstset{
+    language=Python,
+    basicstyle=\ttfamily\footnotesize,
+    keywordstyle=\color{blue!70!black}\bfseries,
+    stringstyle=\color{red!70!black},
+    commentstyle=\color{green!40!black}\itshape,
+    breaklines=true,
+    frame=lines,
+    backgroundcolor=\color{gray!5},
+    showstringspaces=false
+}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section*{Introduction}
+This guide provides a deep-dive technical reference for the Arolla Glacier project. It is structured to facilitate clear explanations of the mathematical derivations, proofs, and implementation details during team meetings.
+
+\section{Part I: Problem Analysis}
+
+\subsection*{Question 1: Order of the Equation}
+\textbf{The Equation:}
+$$ 2\partial_x (\eta \partial_x u) + \frac{1}{2} \partial_z (\eta \partial_z u) = \rho g \partial_x h $$
+\textbf{Derivation:}
+To determine the order, we look at the highest derivative of the dependent variable $u$.
+\begin{enumerate}
+    \item Expand the outer differential operator using the product rule (assuming $\eta$ is constant or smooth):
+    $$ \partial_x (\eta \partial_x u) = \eta \underbrace{\partial_{xx} u}_{\text{2nd derivative}} + (\partial_x \eta) (\partial_x u) $$
+    \item The term $\partial_{xx} u$ represents a second-order derivative with respect to $x$.
+    \item Similarly, the $z$-term contains $\partial_{zz} u$.
+\end{enumerate}
+\textbf{Conclusion:} The highest derivative is of order 2. Thus, it is a **Second-Order PDE**.
+
+\subsection*{Question 2: Classification of the PDE}
+\textbf{General Form:}
+A linear second-order PDE in two variables $(x,z)$ is defined as:
+$$ A u_{xx} + 2B u_{xz} + C u_{zz} + D u_x + E u_z + F u = G $$
+\textbf{Step-by-Step Classification:}
+\begin{enumerate}
+    \item **Identify Coefficients:** From our linearized equation ($2\eta u_{xx} + 0.5\eta u_{zz} = \dots$), we map the terms:
+    $$ A = 2\eta, \quad B = 0, \quad C = \frac{1}{2}\eta $$
+    \item **Calculate Discriminant:**
+    $$ \Delta = B^2 - AC = 0^2 - (2\eta)\left(\frac{1}{2}\eta\right) = -\eta^2 $$
+    \item **Analyze Sign:** Since viscosity $\eta$ is a physical property, $\eta > 0$. Therefore, $-\eta^2 < 0$.
+    \item **Classify:** A negative discriminant ($\Delta < 0$) defines an **Elliptic** equation.
+\end{enumerate}
+\textbf{Physical Interpretation:}
+Elliptic equations characterize equilibrium states. Unlike hyperbolic equations (waves) where information travels at a finite speed $c$, in elliptic problems, a disturbance at the boundary is felt *instantaneously* throughout the entire domain. This justifies the "Stokes flow" assumption of negligible inertia.
+
+\section{Part II: Finite Element Formulation}
+
+\subsection*{Question 3: Weak Form Derivation}
+This is the core of our FEM solver. We convert the coordinate-based differential equation into an integral form.
+
+\textbf{Start:} Strong Form
+$$ \nabla \cdot \boldsymbol{\sigma} = f $$
+where $\boldsymbol{\sigma}$ contains our stress terms $(2\eta u_x, 0.5\eta u_z)$ and $f = \rho g h_x$.
+
+\textbf{Step 1: Multiply and Integrate}
+Multiply by a test function $v$ from the space $V_0 = \{ v \in H^1(\Omega) \mid v|_{\Gamma_b}=0 \}$ and integrate over volume $\Omega$:
+$$ \int_{\Omega} (\nabla \cdot \boldsymbol{\sigma}) v \, d\Omega = \int_{\Omega} f v \, d\Omega $$
+
+\textbf{Step 2: Integration by Parts (Green's Identity)}
+We transfer one derivative from $\boldsymbol{\sigma}$ to $v$.
+rule: $\int (\nabla \cdot A) v = - \int A \cdot \nabla v + \oint v (A \cdot n)$.
+$$ - \int_{\Omega} \boldsymbol{\sigma} \cdot \nabla v \, d\Omega + \underbrace{\oint_{\partial \Omega} v (\boldsymbol{\sigma} \cdot \mathbf{n}) \, ds}_{\text{Boundary Terms}} = \int_{\Omega} f v \, d\Omega $$
+
+\textbf{Step 3: Analyze Boundary Terms}
+The boundary $\partial \Omega$ has two parts:
+\begin{enumerate}
+    \item **Bedrock ($\Gamma_b$):** Here $u=0$ (Dirichlet). Our test space $V_0$ requires $v=0$ on $\Gamma_b$. Thus, the integral is **zero**.
+    \item **Surface ($\Gamma_s$):** The physical condition is "traction-free" or "stress-free", meaning $\boldsymbol{\sigma} \cdot \mathbf{n} = 0$. Thus, the integral is **zero**.
+\end{enumerate}
+
+\textbf{Step 4: Final Form}
+Rearranging to standard $a(u,v) = L(v)$ form:
+$$ \int_{\Omega} \left( 2\eta \frac{\partial u}{\partial x} \frac{\partial v}{\partial x} + \frac{1}{2}\eta \frac{\partial u}{\partial z} \frac{\partial v}{\partial z} \right) d\Omega = - \int_{\Omega} \rho g \frac{\partial h}{\partial x} v \, d\Omega $$
+
+\section{Part III: Theoretical Guarantees}
+
+\subsection*{Question 5: Galerkin Orthogonality}
+This property proves geometrically that the FEM error is "perpendicular" to the approximation space.
+\begin{enumerate}
+    \item **Exact Problem:** $a(u, v) = L(v)$ for all $v \in V_0$.
+    \item **Discrete Problem:** $a(u_h, v_h) = L(v_h)$ for all $v_h \in V_h$.
+    \item **Subset Property:** Since $V_h \subset V_0$, we can choose $v = v_h$ in the exact problem.
+    \item **Subtraction:**
+    $$ a(u, v_h) - a(u_h, v_h) = L(v_h) - L(v_h) = 0 $$
+    $$ a(u - u_h, v_h) = 0 $$
+\end{enumerate}
+
+\subsection*{Question 6: Best Approximation Property}
+We prove that $u_h$ is the best possible approximation in the energy norm $\|w\|_E = \sqrt{a(w,w)}$.
+\textbf{Proof steps:}
+\begin{enumerate}
+    \item Take any function $v_h \in V_h$. We want to measure the distance $\|u - v_h\|_E^2$.
+    \item Write $u - v_h$ as $(u - u_h) + (u_h - v_h)$.
+    \item Expand the norm:
+    $$ \|u - v_h\|_E^2 = a(u - u_h + w_h, u - u_h + w_h) $$
+    where $w_h = u_h - v_h$.
+    \item Distribute terms:
+    $$ = \underbrace{a(u - u_h, u - u_h)}_{\|u-u_h\|^2} + 2\underbrace{a(u - u_h, w_h)}_{0 \text{ by Orthogonality}} + \underbrace{a(w_h, w_h)}_{\ge 0} $$
+    \item Conclusion:
+    $$ \|u - v_h\|_E^2 \ge \|u - u_h\|_E^2 $$
+    The error of our solution $u_h$ is smaller than or equal to the error of any other function $v_h$.
+\end{enumerate}
+
+\subsection*{Question 7: A Priori Error Estimate}
+How big is the error?
+\begin{enumerate}
+    \item From Q6, we know $\|u - u_h\|_E \le \|u - \pi_h u\|_E$ (where $\pi_h u$ is the interpolation).
+    \item Standard interpolation theory tells us that for mesh size $h$, the interpolation error gradients scale with $h$:
+    $$ \|\nabla(u - \pi_h u)\| \le C h \|u\|_{H^2} $$
+    \item Combining these:
+    $$ \|u - u_h\|_E \le C \sqrt{\eta} h \|u\|_{H^2} $$
+    \item **Meaning:** If we halve the mesh size $h$, the error is cut in half (Linear Convergence).
+\end{enumerate}
+
+\section{Part IV: Implementation \& Results}
+
+\subsection*{Question 4: Linear Implementation Code}
+The FEniCSx implementation directly mirrors the Weak Form derived in Q3.
+\begin{lstlisting}[language=Python]
+# Define Function Space (P1 Elements)
+V = fem.functionspace(msh, basix.ufl.element("Lagrange", "triangle", 1))
+
+# Define Variational Problem
+a = (2 * eta * ufl.Dx(u, 0) * ufl.Dx(v, 0) + 
+     0.5 * eta * ufl.Dx(u, 1) * ufl.Dx(v, 1)) * ufl.dx
+L = - rho * g * ufl.Dx(h, 0) * v * ufl.dx
+
+# Solve
+problem = LinearProblem(a, L, bcs=bcs, petsc_options={...})
+uh = problem.solve()
+\end{lstlisting}
+
+\subsection*{Question 8: Non-Linear Algorithm (Picard)}
+Since $\eta$ depends on $u$, we cannot solve in one step. We use **Picard Iteration**:
+\begin{lstlisting}
+Initialize u = 0
+Loop k = 1 to max_iter:
+    1. Calculate Strain Rate E from u_{k-1}
+    2. Update Viscosity: eta = 0.5 * A^(-1/n) * (E + epsilon)^((1-n)/2n)
+    3. Define linear forms a(u, v) using new eta
+    4. Solve linear system -> u_k
+    5. Check convergence: norm(u_k - u_{k-1}) < tolerance
+\end{lstlisting}
+
+\subsection*{Question 9: Impact of Regularization ($\epsilon$)}
+The parameter $\epsilon$ prevents division by zero when the glacier is not moving (strain rate $\approx 0$).
+\begin{itemize}
+    \item **Small $\epsilon$ ($10^{-10}$):** The physics governs. Viscosity becomes very high at stagnation points. This "stiff" behavior is hard to solve (10 iterations).
+    \item **Large $\epsilon$ ($10^{-1}$):** The regularization dominates. Viscosity is capped and smooth. The problem looks linear to the solver (3 iterations), but the result is physically inaccurate.
+\end{itemize}
+
+\end{document}

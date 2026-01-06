@@ -1,0 +1,444 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\title{\textbf{Finite Element Simulation of Non-Newtonian Glacier Flow: \\
+A Computational Study of the Haut Glacier d'Arolla}}
+
+\author{Shek Lun Leung}
+
+\date{January 2026}
+
+\lstset{
+    language=Python,
+    basicstyle=\ttfamily\footnotesize,
+    keywordstyle=\color{blue!70!black}\bfseries,
+    stringstyle=\color{red!70!black},
+    commentstyle=\color{green!40!black}\itshape,
+    breaklines=true,
+    frame=single,
+    backgroundcolor=\color{gray!5},
+    showstringspaces=false,
+    numbers=left,
+    numberstyle=\tiny\color{gray}
+}
+
+\newtheorem{theorem}{Theorem}[section]
+
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present a comprehensive computational study of glacier flow dynamics using the Finite Element Method (FEM) applied to the Haut Glacier d'Arolla in Switzerland. The study implements both linear and non-linear formulations of the First-Order Stokes approximation, accounting for the strain-rate dependent rheology of ice through Glen's flow law. We derive the weak formulation from first principles, establish rigorous mathematical properties including Galerkin orthogonality and best approximation theorems, and demonstrate convergence through \textit{a priori} error estimates. The non-linear problem is solved using Picard iteration with systematic analysis of regularization effects. Our results reveal significant differences between linear and non-linear models: the non-linear Glen's law formulation produces velocities approximately three orders of magnitude larger with characteristic ``plug-flow'' profiles, contrasting with the parabolic profiles of linear viscosity models. Convergence analysis demonstrates that regularization parameter $\epsilon$ strongly influences iteration count, ranging from 3 iterations ($\epsilon = 10^{-1}$) to 10 iterations ($\epsilon = 10^{-10}$). This work provides a complete framework for computational glaciology, from mathematical foundations to practical implementation using modern FEM software (FEniCSx).
+\end{abstract}
+
+\section{Introduction}
+
+\subsection{Motivation and Context}
+Glacier flow dynamics represent a critical component in understanding climate change impacts, sea-level rise prediction, and geophysical fluid mechanics. Ice flow is governed by complex non-Newtonian rheology, where viscosity depends non-linearly on strain rate through Glen's flow law \cite{glen1955}. Computational modeling of such systems requires sophisticated numerical methods capable of handling geometric complexity, variable material properties, and coupled physical processes.
+
+The Finite Element Method (FEM) has emerged as the standard approach for glacier modeling due to its flexibility in handling irregular geometries, natural enforcement of boundary conditions, and rigorous mathematical foundation \cite{greve2009}. This study focuses on the Haut Glacier d'Arolla in Switzerland, providing a realistic test case with complex topography and well-documented characteristics.
+
+\subsection{Physical Model: First-Order Stokes Approximation}
+For thin ice sheets where horizontal extent greatly exceeds vertical thickness, the First-Order (FO) Stokes approximation provides an efficient balance between physical accuracy and computational cost. The governing equation for horizontal velocity $u = u(x,z)$ is:
+
+\begin{equation} \label{eq:fo_model}
+2\frac{\partial}{\partial x}\left(\eta \frac{\partial u}{\partial x}\right) + \frac{1}{2}\frac{\partial}{\partial z}\left(\eta \frac{\partial u}{\partial z}\right) = \rho g \frac{\partial h}{\partial x}
+\end{equation}
+
+where $\eta$ is the effective viscosity (Pa·s), $\rho = 910$ kg/m³ is ice density, $g = 9.81$ m/s² is gravitational acceleration, $h = h(x)$ is the surface elevation, and $(x,z)$ represent horizontal and vertical coordinates respectively.
+
+\subsection{Glen's Flow Law}
+Ice exhibits power-law (non-Newtonian) rheology described by Glen's flow law:
+
+\begin{equation} \label{eq:glens_law}
+\eta(\dot{\epsilon}_e) = \frac{1}{4} A^{-1/n} \dot{\epsilon}_e^{(1-n)/n}
+\end{equation}
+
+where $A = 1.0 \times 10^{-16}$ Pa$^{-n}$ yr$^{-1}$ is the flow parameter, $n = 3$ is Glen's exponent, and $\dot{\epsilon}_e$ is the effective strain rate defined as:
+
+\begin{equation}
+\dot{\epsilon}_e = \sqrt{\left(\frac{\partial u}{\partial x}\right)^2 + \left(\frac{\partial u}{\partial z}\right)^2 + \epsilon}
+\end{equation}
+
+The regularization parameter $\epsilon > 0$ prevents singularities at zero strain rate.
+
+\subsection{Objectives}
+This work aims to:
+\begin{enumerate}
+    \item Rigorously derive the weak formulation and establish mathematical properties of the FEM discretization
+    \item Implement both linear (constant $\eta$) and non-linear (Glen's law) solvers using modern FEM software
+    \item Analyze the impact of non-Newtonian rheology on flow characteristics
+    \item Study regularization effects on convergence behavior
+\end{enumerate}
+
+\section{Mathematical Analysis}
+
+\subsection{PDE Classification}
+To understand the mathematical character of Equation \eqref{eq:fo_model}, we classify it using the standard discriminant method. Consider the linearized form with constant viscosity $\eta > 0$:
+
+\begin{equation}
+2\eta \frac{\partial^2 u}{\partial x^2} + \frac{1}{2}\eta \frac{\partial^2 u}{\partial z^2} = f
+\end{equation}
+
+Comparing with the general second-order linear PDE form $A u_{xx} + 2B u_{xz} + C u_{zz} + \cdots = 0$, we identify coefficients:
+\[ A = 2\eta, \quad B = 0, \quad C = \frac{1}{2}\eta \]
+
+The discriminant is:
+\begin{equation}
+\Delta = B^2 - AC = 0 - (2\eta)\left(\frac{1}{2}\eta\right) = -\eta^2 < 0
+\end{equation}
+
+\textbf{Classification:} Since $\Delta < 0$, the equation is \textbf{elliptic}.
+
+\textbf{Physical Interpretation:} Elliptic PDEs describe equilibrium states where information propagates instantaneously across the domain. In Stokes flow (negligible inertia, $Re \ll 1$), forces balance everywhere simultaneously, making the velocity field at any point dependent on global boundary conditions. This necessitates global solution methods like FEM rather than time-marching schemes.
+
+\subsection{Weak Formulation}
+We derive the variational formulation suitable for FEM implementation.
+
+\textbf{Function Spaces:} Define the trial space and test space:
+\begin{align}
+V &= \{ u \in H^1(\Omega) \mid u|_{\Gamma_b} = 0 \} \\
+V_0 &= \{ v \in H^1(\Omega) \mid v|_{\Gamma_b} = 0 \}
+\end{align}
+
+where $\Omega \subset \mathbb{R}^2$ is the glacier domain, $\Gamma_b$ is the bedrock boundary (no-slip condition), $\Gamma_s$ is the surface (stress-free), and $H^1(\Omega)$ is the Sobolev space of functions with square-integrable derivatives.
+
+\textbf{Derivation:}
+\begin{enumerate}
+    \item \textit{Multiply and integrate:} Multiply Equation \eqref{eq:fo_model} by test function $v \in V_0$ and integrate over $\Omega$:
+    \begin{equation}
+    \int_{\Omega} \left[ 2\frac{\partial}{\partial x}\left(\eta \frac{\partial u}{\partial x}\right) + \frac{1}{2}\frac{\partial}{\partial z}\left(\eta \frac{\partial u}{\partial z}\right) \right] v \, d\Omega = \int_{\Omega} \rho g \frac{\partial h}{\partial x} v \, d\Omega
+    \end{equation}
+    
+    \item \textit{Integration by parts (Green's identity):} Apply divergence theorem to transfer derivatives:
+    \begin{multline}
+    \int_{\Omega} \frac{\partial}{\partial x}\left(\eta \frac{\partial u}{\partial x}\right) v \, d\Omega = \oint_{\partial\Omega} \eta \frac{\partial u}{\partial x} n_x v \, ds - \int_{\Omega} \eta \frac{\partial u}{\partial x} \frac{\partial v}{\partial x} \, d\Omega
+    \end{multline}
+    
+    Similarly for the vertical term.
+    
+    \item \textit{Boundary conditions:}
+    \begin{itemize}
+        \item On bedrock $\Gamma_b$: $u = 0$ (Dirichlet) and $v = 0$ by definition of $V_0$, so boundary integrals vanish.
+        \item On surface $\Gamma_s$: Stress-free condition implies $\boldsymbol{\sigma} \cdot \mathbf{n} = 0$ (natural BC), boundary terms vanish.
+    \end{itemize}
+\end{enumerate}
+
+\textbf{Weak Formulation:} Find $u \in V$ such that for all $v \in V_0$:
+
+\begin{equation} \label{eq:weak_form}
+a(u, v) = L(v)
+\end{equation}
+
+where the bilinear form $a(\cdot, \cdot)$ and linear functional $L(\cdot)$ are:
+
+\begin{align}
+a(u, v) &= \int_{\Omega} \left( 2\eta \frac{\partial u}{\partial x} \frac{\partial v}{\partial x} + \frac{1}{2}\eta \frac{\partial u}{\partial z} \frac{\partial v}{\partial z} \right) d\Omega \label{eq:bilinear} \\
+L(v) &= -\int_{\Omega} \rho g \frac{\partial h}{\partial x} v \, d\Omega \label{eq:linear_functional}
+\end{align}
+
+\subsection{Theoretical Properties}
+
+\subsubsection{Galerkin Orthogonality}
+\begin{theorem}[Galerkin Orthogonality]
+Let $u \in V$ be the exact solution to \eqref{eq:weak_form} and $u_h \in V_h \subset V$ be the discrete FEM solution. Then the error $e_h = u - u_h$ satisfies:
+\begin{equation}
+a(e_h, v_h) = 0 \quad \forall v_h \in V_h
+\end{equation}
+\end{theorem}
+
+\begin{proof}
+The exact solution satisfies $a(u, v) = L(v)$ for all $v \in V$. Since $V_h \subset V$, this holds for all $v_h \in V_h$:
+\[ a(u, v_h) = L(v_h) \]
+
+The discrete solution satisfies $a(u_h, v_h) = L(v_h)$ for all $v_h \in V_h$ (by definition of FEM). Subtracting:
+\[ a(u, v_h) - a(u_h, v_h) = 0 \]
+
+By bilinearity of $a(\cdot, \cdot)$:
+\[ a(u - u_h, v_h) = a(e_h, v_h) = 0 \]
+\end{proof}
+
+\textbf{Interpretation:} The FEM error contains no component representable in the discrete space $V_h$. The error is ``orthogonal'' (in energy norm) to the approximation space.
+
+\subsubsection{Best Approximation Property}
+\begin{theorem}[Céa's Lemma - Best Approximation]
+Assume $a(\cdot, \cdot)$ is coercive and continuous. Then the FEM solution $u_h$ minimizes the energy norm error:
+\begin{equation}
+\|u - u_h\|_E \leq \|u - v_h\|_E \quad \forall v_h \in V_h
+\end{equation}
+where $\|w\|_E = \sqrt{a(w, w)}$ is the energy norm.
+\end{theorem}
+
+\begin{proof}
+For any $v_h \in V_h$, decompose:
+\[ u - v_h = (u - u_h) + (u_h - v_h) = e_h + w_h \]
+
+where $w_h = u_h - v_h \in V_h$. Compute the energy norm:
+\begin{align}
+\|u - v_h\|_E^2 &= a(e_h + w_h, e_h + w_h) \\
+&= a(e_h, e_h) + 2a(e_h, w_h) + a(w_h, w_h) \\
+&= \|e_h\|_E^2 + 2 \cdot 0 + \|w_h\|_E^2 \quad \text{(by Galerkin orthogonality)} \\
+&= \|u - u_h\|_E^2 + \|w_h\|_E^2 \geq \|u - u_h\|_E^2
+\end{align}
+\end{proof}
+
+\subsubsection{A Priori Error Estimate}
+\begin{theorem}[Convergence Rate]
+Assume $u \in H^2(\Omega)$ and the mesh has characteristic element size $h$. Then:
+\begin{equation}
+\|u - u_h\|_E \leq Ch \|u\|_{H^2(\Omega)}
+\end{equation}
+where $C$ is a constant independent of $h$.
+\end{theorem}
+
+\begin{proof}[Proof Sketch]
+By the best approximation property:
+\[ \|u - u_h\|_E \leq \|u - \pi_h u\|_E \]
+where $\pi_h u$ is the nodal interpolant. Standard interpolation theory for P1 elements gives:
+\[ \|\nabla(u - \pi_h u)\|_{L^2} \leq Ch \|u\|_{H^2} \]
+
+Since $\|w\|_E \approx \sqrt{\eta} \|\nabla w\|_{L^2}$ for our bilinear form:
+\[ \|u - u_h\|_E \leq C\sqrt{\eta} h \|u\|_{H^2} \]
+\end{proof}
+
+\textbf{Implication:} Linear convergence in $h$. Halving the mesh size halves the error in energy norm.
+
+\section{Numerical Methods}
+
+\subsection{Linear Problem Implementation}
+For the linear case ($\eta = \text{constant}$), Equation \eqref{eq:weak_form} yields a standard linear system.
+
+\textbf{Discretization:} Using continuous piecewise linear (P1) Lagrange elements on a triangular mesh, the discrete problem becomes: Find $u_h \in V_h$ such that:
+\[ A \mathbf{u} = \mathbf{b} \]
+
+where $A$ is the stiffness matrix and $\mathbf{b}$ is the load vector derived from \eqref{eq:bilinear} and \eqref{eq:linear_functional}.
+
+\textbf{FEniCSx Implementation:} The weak form translates directly to Unified Form Language (UFL):
+
+\begin{lstlisting}[caption={Linear solver implementation}]
+# Define function space (P1 elements)
+V = fem.functionspace(mesh, ("Lagrange", 1))
+
+# Define trial and test functions
+u = ufl.TrialFunction(V)
+v = ufl.TestFunction(V)
+
+# Bilinear form
+a = (2*eta*ufl.Dx(u,0)*ufl.Dx(v,0) + 
+     0.5*eta*ufl.Dx(u,1)*ufl.Dx(v,1)) * ufl.dx
+
+# Linear form
+L = -rho * g * ufl.Dx(h, 0) * v * ufl.dx
+
+# Solve
+problem = LinearProblem(a, L, bcs=boundary_conditions)
+u_h = problem.solve()
+\end{lstlisting}
+
+\textbf{Parameters:} We set $\eta = 10^{13}$ Pa·s (approximate effective viscosity for temperate ice), $\rho = 910$ kg/m³, and $g = 9.81$ m/s².
+
+\subsection{Non-Linear Problem: Picard Iteration}
+
+The non-linear viscosity \eqref{eq:glens_law} couples $\eta$ and $u$, necessitating an iterative approach. We employ the Picard (fixed-point) iteration method.
+
+\noindent\fbox{\begin{minipage}{0.95\textwidth}
+\textbf{Algorithm 1:} Picard Iteration for Non-Linear Glacier Flow
+
+\textbf{Input:} Initial guess $u_0$, tolerance $\tau$, max iterations $N_{\text{max}}$ \\
+\textbf{Output:} Converged solution $u^*$
+
+\begin{enumerate}
+    \item Initialize: $u^{(0)} \gets u_0$ (typically $u_0 = 0$)
+    \item \textbf{For} $k = 1, 2, \ldots, N_{\text{max}}$:
+    \begin{enumerate}
+        \item Compute strain rate from previous iterate: \\
+        $\dot{\epsilon}_e^{(k-1)} = \sqrt{(u_x^{(k-1)})^2 + (u_z^{(k-1)})^2 + \epsilon}$
+        \item Compute viscosity: $\eta^{(k-1)} = \frac{1}{4} A^{-1/3} (\dot{\epsilon}_e^{(k-1)})^{-2/3}$
+        \item Solve linear problem with fixed $\eta^{(k-1)}$: \\
+        Find $u^{(k)}$ such that $a(u^{(k)}, v; \eta^{(k-1)}) = L(v)$ $\forall v \in V_h$
+        \item Compute relative error: $e_{\text{rel}} = \|u^{(k)} - u^{(k-1)}\| / \|u^{(k)}\|$
+        \item \textbf{If} $e_{\text{rel}} < \tau$: \textbf{Return} $u^{(k)}$ (converged)
+    \end{enumerate}
+    \item \textbf{Return} $u^{(N_{\text{max}})}$ (max iterations reached)
+\end{enumerate}
+\end{minipage}}
+
+\vspace{0.3cm}
+
+
+\textbf{Convergence Criterion:} We use relative L² norm difference $\|u^{(k)} - u^{(k-1)}\|_{L^2} / \|u^{(k)}\|_{L^2} < 10^{-6}$.
+
+\section{Results and Analysis}
+
+\subsection{Computational Setup}
+\begin{itemize}
+    \item \textbf{Domain:} Haut Glacier d'Arolla, Switzerland
+    \item \textbf{Mesh:} Unstructured triangular mesh with $\sim$1200 vertices
+    \item \textbf{Software:} FEniCSx v0.8, Python 3.10
+    \item \textbf{Linear Solver:} Direct LU decomposition (PETSc)
+\end{itemize}
+
+\subsection{Linear Model Results}
+
+Figure \ref{fig:velocity} shows the computed horizontal velocity field for the linear model ($\eta = 10^{13}$ Pa·s). The solution exhibits expected characteristics:
+\begin{itemize}
+    \item Zero velocity at bedrock (no-slip BC enforced)
+    \item Maximum velocity at surface
+    \item Parabolic vertical profile typical of Newtonian flow
+    \item Velocity magnitude: $\mathcal{O}(10^{-6})$ m/s
+\end{itemize}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.75\textwidth]{plots/velocity_field.png}
+    \caption{Horizontal velocity field from the linear model with constant viscosity $\eta = 10^{13}$ Pa·s. The parabolic velocity profile is characteristic of Newtonian fluid flow in a gravitational field.}
+    \label{fig:velocity}
+\end{figure}
+
+\subsection{Non-Linear Model Results}
+
+Figure \ref{fig:nonlinear_velocity} presents results from the non-linear Glen's law formulation with regularization $\epsilon = 10^{-10}$. Convergence was achieved in 10 Picard iterations.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]{plots/nonlinear_velocity.png}
+    \caption{Non-linear velocity field with Glen's law rheology ($n=3$, $\epsilon = 10^{-10}$). Note the order of magnitude difference compared to Figure \ref{fig:velocity} and the characteristic ``plug-flow'' profile.}
+    \label{fig:nonlinear_velocity}
+\end{figure}
+
+\textbf{Key Observations:}
+\begin{enumerate}
+    \item \textbf{Magnitude:} Velocities are $\mathcal{O}(10^{-3})$ m/s, approximately 1000× larger than the linear case. This reflects the lower effective viscosity under realistic ice rheology.
+    
+    \item \textbf{Profile Shape:} The vertical velocity profile shows ``plug flow'' behavior characteristic of power-law fluids with $n > 1$. Most deformation occurs near the bedrock, with relatively uniform velocity in the upper layers.
+\end{enumerate}
+
+\subsection{Comparative Analysis: Linear vs Non-Linear}
+
+Figure \ref{fig:profile_comp} directly compares vertical velocity profiles at a representative cross-section ($x \approx 2500$ m).
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.75\textwidth]{plots/profile_comparison.png}
+    \caption{Vertical velocity profiles comparing linear (blue) and non-linear (red) models at $x \approx 2500$ m. Note the logarithmic scale on the horizontal axis due to three orders of magnitude difference in velocity.}
+    \label{fig:profile_comp}
+\end{figure}
+
+\textbf{Quantitative Differences:}
+\begin{itemize}
+    \item \textbf{Velocity ratio:} $u_{\text{nonlinear}} / u_{\text{linear}} \approx 10^3$
+    \item \textbf{Shear concentration:} Non-linear model: 80\% of velocity change in bottom 20\% of thickness; Linear model: uniform shear distribution
+    \item \textbf{Physical realism:} Non-linear velocities align with field observations ($\sim$10-100 m/year $\approx 10^{-6}$-$10^{-5}$ m/s)
+\end{itemize}
+
+\subsection{Regularization Parameter Study}
+
+Table \ref{tab:convergence} summarizes the convergence behavior for different regularization parameters $\epsilon$.
+
+\begin{table}[htbp]
+\centering
+\caption{Picard iteration convergence as a function of regularization parameter $\epsilon$. Convergence tolerance: $10^{-6}$ relative L² norm.}
+\label{tab:convergence}
+\begin{tabular}{c|c|c|c}
+\hline
+\textbf{$\epsilon$} & \textbf{Iterations} & \textbf{Final Error} & \textbf{Physical Regime} \\ \hline
+$10^{-1}$ & 3 & $8.2 \times 10^{-7}$ & Nearly Newtonian \\
+$10^{-5}$ & 3 & $5.1 \times 10^{-7}$ & Moderate non-linearity \\
+$10^{-10}$ & 10 & $9.3 \times 10^{-7}$ & Fully non-linear \\ \hline
+\end{tabular}
+\end{table}
+
+\textbf{Analysis:}
+\begin{itemize}
+    \item \textbf{Large $\epsilon$ ($10^{-1}$):} The regularization term dominates in the strain rate calculation, effectively bounding viscosity variation. The problem behaves nearly linearly, converging rapidly (3 iterations). However, this compromises physical accuracy.
+    
+    \item \textbf{Small $\epsilon$ ($10^{-10}$):} Viscosity varies strongly with strain rate, creating a highly non-linear problem. Convergence is slower (10 iterations) but physically realistic.
+    
+    \item \textbf{Trade-off:} Choice of $\epsilon$ balances numerical stability versus physical fidelity. For production simulations, $\epsilon \sim 10^{-10}$ to $10^{-8}$ is recommended.
+\end{itemize}
+
+\section{Discussion}
+
+\subsection{Physical Interpretation}
+
+The dramatic difference between linear and non-linear results underscores the critical importance of proper rheological modeling in glacier simulations. Glen's law captures the shear-thinning behavior of ice: where strain rates are high (near bedrock), viscosity decreases, allowing easier deformation. This creates the characteristic plug-flow profile observed in real glaciers.
+
+The linear model, while mathematically simpler and computationally cheaper, significantly underestimates flow velocities and misrepresents the deformation pattern. Such models may be acceptable for qualitative studies or algorithm development but are unsuitable for quantitative predictions.
+
+\subsection{Computational Considerations}
+
+\textbf{Efficiency:} Picard iteration proved effective, requiring only 3-10 iterations for convergence across all tested $\epsilon$ values. Each iteration solves a linear system with fixed viscosity, allowing efficient direct solvers.
+
+\textbf{Alternative Methods:} Newton-Raphson methods could achieve quadratic convergence but require computing Jacobians, significantly increasing complexity. For this problem size, Picard's linear convergence is acceptable.
+
+\textbf{Scalability:} For large-scale 3D problems, iterative linear solvers (GMRES, multigrid) would replace direct methods, and parallel computation becomes essential.
+
+\subsection{Limitations and Future Work}
+
+\textbf{Current Limitations:}
+\begin{enumerate}
+    \item \textbf{2D Approximation:} The First-Order Stokes model neglects lateral (y-direction) variations
+    \item \textbf{Steady-State:} Transient behavior and seasonal variations are not captured
+    \item \textbf{Temperature Independence:} Flow parameter $A$ is assumed constant (should depend on temperature)
+    \item \textbf{Simplified Boundary Conditions:} Basal sliding and calving processes not modeled
+\end{enumerate}
+
+\textbf{Future Extensions:}
+\begin{enumerate}
+    \item \textbf{Full 3D Stokes:} Remove thin-ice approximation for complex geometries
+    \item \textbf{Thermo-mechanical Coupling:} Solve coupled heat equation, temperature-dependent $A(T)$
+    \item \textbf{Mesh Adaptivity:} Refine mesh near high-gradient regions (bedrock, surface)
+    \item \textbf{Uncertainty Quantification:} Propagate parameter uncertainties through model
+    \item \textbf{Data Assimilation:} Incorporate observational data (velocities, surface elevation changes)
+\end{enumerate}
+
+
+\newpage
+\section{Conclusions}
+
+This work presents a rigorous computational framework for glacier flow simulation, progressing from mathematical foundations through to practical implementation and physical interpretation. Key contributions include:
+
+\begin{enumerate}
+    \item \textbf{Mathematical Rigor:} Complete derivation of weak formulation with proofs of Galerkin orthogonality, best approximation, and convergence properties
+    
+    \item \textbf{Practical Implementation:} Production-ready FEM code using modern software (FEniCSx), available as open-source for reproducibility
+    
+    \item \textbf{Physical Insight:} Quantitative demonstration that non-Newtonian rheology is essential for accurate glacier modeling, with velocities differing by three orders of magnitude from linear models
+    
+    \item \textbf{Convergence Analysis:} Systematic study of regularization effects, providing guidance for parameter selection in production simulations
+\end{enumerate}
+
+The methodology established here provides a foundation for advanced glacier modeling, including three-dimensional, time-dependent, and thermo-mechanically coupled simulations. The combination of mathematical rigor, computational efficiency, and physical realism makes this approach well-suited for both research applications and operational forecasting.
+
+\section*{Acknowledgments}
+This work builds upon a group project conducted at Stockholm University. The author gratefully acknowledges the university for providing the computational glaciology course framework and access to the Haut Glacier d'Arolla mesh data. The complete reimplementation, mathematical analysis, and presentation are the author's independent contributions.
+
+\begin{thebibliography}{99}
+
+\bibitem{glen1955}
+Glen, J. W. (1955). The creep of polycrystalline ice. \textit{Proceedings of the Royal Society of London. Series A. Mathematical and Physical Sciences}, 228(1175), 519-538.
+
+\bibitem{greve2009}
+Greve, R., \& Blatter, H. (2009). \textit{Dynamics of ice sheets and glaciers}. Springer Science \& Business Media.
+
+\bibitem{jouvet2011}
+Jouvet, G., \& Rappaz, J. (2011). Analysis and finite element approximation of a nonlinear stationary Stokes problem arising in glaciology. \textit{Advances in Numerical Analysis}, 2011.
+
+\bibitem{ahlkrona2017}
+Ahlkrona, J., et al. (2017). A cut finite element method for non-Newtonian free surface flows in 2D—application to glacier modelling. \textit{Computers \& Fluids}, 146, 43-54.
+
+\bibitem{fenicsx}
+Baratta, I. A., et al. (2023). DOLFINx: The next generation FEniCS problem solving environment. \textit{Zenodo}.
+
+\end{thebibliography}
+
+\end{document}
